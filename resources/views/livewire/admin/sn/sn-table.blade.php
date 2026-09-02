@@ -26,15 +26,15 @@ new class extends Component {
         ],
     ];
 
+    public function mount()
+    {
+        $this->resetPage();
+    }
+
     public function updatedItemFilter()
     {
         $this->resetPage();
         unset($this->serials);
-    }
-
-    public function mount()
-    {
-        $this->resetPage();
     }
 
     public function getItemsProperty()
@@ -44,10 +44,7 @@ new class extends Component {
 
     public function getSerialsProperty()
     {
-        return Item_sn_references::query()
-            ->when($this->itemFilter, fn ($q) => $q->where('item_id', $this->itemFilter))
-            ->orderBy('item_id', $this->sort)
-            ->Paginate(10);
+        return Item_sn_references::query()->when($this->itemFilter, fn($q) => $q->where('item_id', $this->itemFilter))->orderBy('item_id', $this->sort)->Paginate(10);
     }
 
     #[On('refreshTable')]
@@ -60,17 +57,31 @@ new class extends Component {
 <div class="space-y-4">
     {{-- Toolbar --}}
     <div class="flex items-center justify-between">
-        {{-- <div class="flex items-center gap-3">
-            <input type="text" placeholder="Search Item..."
-                class="w-72 rounded-lg border border-zinc-300 px-4 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none">
-            <select
-                class="w-72 rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-500 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 focus:outline-none"
-                wire:model.live="itemFilter" placeholder="Choose Item...">
-                @foreach ($this->items as $item)
-                    <flux:select.option value="{{ $item->id }}">{{ $item->name }}</flux:select.option>
-                @endforeach
-            </select>
-        </div> --}}
+        {{-- Item Filter --}}
+        <div class="flex items-center gap-3">
+            <span>Filter by Item:</span>
+
+            {{-- All --}}
+            <button wire:click="$set('itemFilter', null)"
+                class="rounded-lg border px-4 py-2 text-sm font-medium transition cursor-pointer
+                    {{ $itemFilter === null
+                        ? 'border-indigo-600 bg-indigo-600 text-white'
+                        : 'border-zinc-300 text-zinc-500 hover:border-indigo-600 hover:bg-zinc-50 hover:text-indigo-600' }}">
+                All
+            </button>
+
+            {{-- Items --}}
+            @foreach ($this->items as $item)
+                <button wire:click="$set('itemFilter', {{ $item->id }})"
+                    class="rounded-lg border px-4 py-2 text-sm font-medium transition cursor-pointer
+                        {{ $itemFilter == $item->id
+                            ? 'border-indigo-600 bg-indigo-600 text-white'
+                            : 'border-zinc-300 text-zinc-500 hover:border-indigo-600 hover:bg-zinc-50 hover:text-indigo-600' }}">
+                    {{ $item->name }}
+                </button>
+            @endforeach
+
+        </div>
 
         <div class="flex items-center gap-3">
             <button @click="showImportSNModal = true"
