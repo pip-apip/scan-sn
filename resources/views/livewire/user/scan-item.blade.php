@@ -17,6 +17,8 @@ new #[Layout('layouts.app-mobile')] class extends Component {
     public string $serial_number = '';
     public string $idSelectedItem = '';
     public bool $compareSN = true;
+    public string $deleteItemId = '';
+    public string $deleteSerialNumber = '';
 
     public function mount($categoryRegion, $subRegion)
     {
@@ -149,7 +151,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
     }
 
     #[On('dialog-result')]
-    public function dialogResult(bool $confirmed, string $action = '')
+    public function dialogResult(bool $confirmed, string $action = '', $itemId = null, $serialNumber = null)
     {
         if (!$confirmed) {
             return;
@@ -157,6 +159,12 @@ new #[Layout('layouts.app-mobile')] class extends Component {
 
         if ($action === 'save-mapping') {
             $this->saveMapping();
+            return;
+        }
+
+        if ($action === 'delete-mapping') {
+            $this->deleteMapping();
+            return;
         }
     }
 
@@ -177,6 +185,43 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         }
 
         $this->clear();
+    }
+
+    public function deleteMapping()
+    {
+        if (empty($this->deleteItemId) || empty($this->deleteSerialNumber)) {
+            return;
+        }
+
+        $deleted = Mapping_lists::where('item_id', $this->deleteItemId)->where('region_id', $this->subRegionId)->where('project_id', 72)->where('serial_number', $this->deleteSerialNumber)->delete();
+
+        if ($deleted) {
+            Flux::toast('Serial Number berhasil dihapus.', null, 3000, 'success');
+        } else {
+            Flux::toast('Serial Number tidak ditemukan.', null, 3000, 'danger');
+        }
+
+        $this->deleteItemId = '';
+        $this->deleteSerialNumber = '';
+
+        // $this->idSelectedItem = '';
+        $this->serial_number = '';
+
+        $this->dispatch('refreshTable');
+    }
+
+    public function confirmDeleteSN($itemId, $serialNumber)
+    {
+        if (empty($serialNumber)) {
+            return;
+        }
+
+        $this->deleteItemId = (string) $itemId;
+        $this->deleteSerialNumber = (string) $serialNumber;
+
+        $itemName = Item::find($itemId)?->name ?? 'Unknown Item';
+
+        $this->dispatch('show-dialog', title: 'Hapus Serial Number', message: "Apakah Anda yakin ingin menghapus Serial Number '{$serialNumber}' dari item '{$itemName}'?", action: 'delete-mapping');
     }
 
     public function clear()
@@ -333,10 +378,12 @@ new #[Layout('layouts.app-mobile')] class extends Component {
 
                 <tbody class="divide-y divide-zinc-100">
                     @foreach ($this->itemSerials as $item)
-                        <tr wire:click="columnItemSelected({{ $item->id }})" @class([
-                            'cursor-pointer hover:bg-zinc-50' => $item->id != $this->idSelectedItem,
-                            'cursor-pointer bg-zinc-200' => $item->id == $this->idSelectedItem,
-                        ])>
+                        <tr wire:click="columnItemSelected({{ $item->id }})"
+                            @if (!empty($item->serial_number)) wire:dblclick="confirmDeleteSN({{ $item->id }}, @js($item->serial_number))" @endif
+                            @class([
+                                'cursor-pointer hover:bg-zinc-50' => $item->id != $this->idSelectedItem,
+                                'cursor-pointer bg-zinc-200' => $item->id == $this->idSelectedItem,
+                            ])>
                             <td class="w-12 px-4 py-4">
                                 @if ($item->id == $this->idSelectedItem)
                                     <div class="h-2 w-2 rounded-full bg-indigo-600"></div>
@@ -353,6 +400,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
                         </tr>
                     @endforeach
                 </tbody>
+
             </table>
         </div>
     </div>
