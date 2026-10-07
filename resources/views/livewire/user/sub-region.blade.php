@@ -74,7 +74,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
             ->get();
 
         // Buat mapping dari name_region ke category_region
-        $regionMap = Region::pluck('category_region', 'name_region')->toArray();
+        $regionMap = Region::pluck('name_region')->toArray();
 
         $activeMap = [];
         foreach ($users as $user) {
@@ -132,7 +132,6 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         if ($guestUuid) {
             Guest_User::where('uuid', $guestUuid)->update([
                 'last_seen_at' => now(),
-                'current_location' => $region,
             ]);
             event(new UserLocationUpdated());
         }
@@ -178,8 +177,10 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         {{-- Semua --}}
         <button wire:click="selectFilter('all')" type="button" @class([
             'flex shrink-0 gap-2 h-[48px] px-4 rounded-md items-center justify-center transition-colors font-medium text-sm md:text-base cursor-pointer',
-            'bg-[#4338ca] text-[#ffffff] border border-[#4338ca]' => $selectedFilter === 'all',
-            'bg-[#ffffff] border-[1.5px] border-[#cbd5e1] text-[#0f172a] hover:bg-[#f8fafc]' => $selectedFilter !== 'all',
+            'bg-[#4338ca] text-[#ffffff] border border-[#4338ca]' =>
+                $selectedFilter === 'all',
+            'bg-[#ffffff] border-[1.5px] border-[#cbd5e1] text-[#0f172a] hover:bg-[#f8fafc]' =>
+                $selectedFilter !== 'all',
         ])>
             Semua
             <span @class([
