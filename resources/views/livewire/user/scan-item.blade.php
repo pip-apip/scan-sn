@@ -72,7 +72,6 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         $guestUuid = session('guest_uuid');
         if ($guestUuid) {
             Guest_User::where('uuid', $guestUuid)->update([
-                'current_location' => $this->categoryRegion,
                 'last_seen_at' => now(),
             ]);
         }
@@ -359,7 +358,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         <span class="text-xs text-[#64748b] font-semibold uppercase tracking-wide hover:text-[#4338CB] cursor-pointer"
             wire:click='backToRegion'>Region</span>
         <flux:icon.chevron-right class="w-3 h-3 text-[#64748b]" />
-        <span
+        <span wire:click='backToSubRegion'
             class="text-xs text-[#64748b] font-semibold uppercase tracking-wide hover:text-[#4338CB] cursor-pointer">{{ $categoryRegion }}</span>
         <flux:icon.chevron-right class="w-3 h-3 text-[#64748b]" />
         <span class="text-sm text-[#4338CB] font-semibold uppercase tracking-wide">{{ $subRegion }}</span>
