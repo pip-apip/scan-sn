@@ -8,10 +8,10 @@
 
 <body class="flex min-h-screen flex-col bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-900">
 
-    @livewire('components.mobile.navbar', ['title' => $title ?? 'Mapping'])
+    @livewire('components.mobile.top-navbar-new', ['title' => $title ?? 'Mapping'])
 
     {{-- Main Content Area --}}
-    <main class="mx-auto w-full max-w-7xl flex-1 p-4 md:p-8">
+    <main class="mx-auto w-full max-w-7xl flex-1 p-0 md:p-2">
         {{ $slot }}
     </main>
 
@@ -22,6 +22,8 @@
     @endpersist
 
     @fluxScripts
+
+    @stack('scripts')
 </body>
 
 </html>

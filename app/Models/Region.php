@@ -15,4 +15,10 @@ class Region extends Model
         'category_region',
         'project_id'
     ];
+
+    // @phpstan-ignore missingType.return
+    public function mappingLists()
+    {
+        return $this->hasMany(Mapping_lists::class, 'region_id');
+    }
 }

@@ -18,7 +18,7 @@ class Item extends Model
     /**
      * @return HasMany<Mapping_lists, $this>
      */
-    public function Mapping_lists(): HasMany
+    public function mappingLists(): HasMany
     {
         return $this->hasMany(Mapping_lists::class, 'item_id', 'id');
     }

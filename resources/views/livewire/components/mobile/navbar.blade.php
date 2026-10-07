@@ -34,6 +34,7 @@ new class extends Component {
     }
 };
 ?>
+
 <header x-data
     @execute-logout.window="
             localStorage.removeItem('guest_uuid');

@@ -12,6 +12,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Volt::route('/admin/project', 'admin.index')->name('admin.project.index');
     Volt::route('/admin/master-data', 'admin.master-data')->name('admin.master-data');
     Volt::route('/admin/guest-user-monitor', 'admin.guest-user-monitor')->name('admin.guest-user-monitor');
+    Volt::route('/admin/result', 'admin.result')->name('admin.result');
 });
 
 Volt::route('/user', 'user.index')->name('user.index');
@@ -19,9 +20,13 @@ Volt::route('/user/{categoryRegion}', 'user.sub-region')->name('user.sub-region'
 Volt::route('/user/{categoryRegion}/{subRegion}', 'user.scan-item')->name('user.scan-item');
 
 Route::get('/test-reverb', function () {
-    broadcast(new UserLocationUpdated());
+    broadcast(new UserLocationUpdated);
 
     return 'Broadcast sent';
 });
+
+Route::get('/realtime-ping', function () {
+    return response()->noContent();
+})->name('realtime.ping');
 
 require __DIR__.'/settings.php';
