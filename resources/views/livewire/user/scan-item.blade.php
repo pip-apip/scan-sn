@@ -7,6 +7,7 @@ use App\Models\Item;
 use App\Models\Mapping_lists;
 use App\Models\Item_sn_references;
 use App\Models\Guest_User;
+use App\Models\Region;
 use App\Events\UserLocationUpdated;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -82,12 +83,79 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         ]);
     }
 
-    public function getSubRegionId()
+    public function getSubRegionId(): string
     {
-        return DB::table('regions')->where('name_region', $this->subRegion)->value('id');
+        // Kembalikan string kosong jika sub region tidak ditemukan di database,
+        // agar tidak men-assign null ke property bertipe string
+        return (string) DB::table('regions')->where('name_region', $this->subRegion)->value('id');
     }
 
-    public function getItemSerialsProperty()
+    /**
+     * Sub region sebelumnya & sesudahnya yang masih satu kelompok (category_region)
+     * dengan sub region yang sedang dibuka. Diurutkan berdasarkan id (asc) agar
+     * konsisten dengan halaman pemilihan sub region. Tidak ada loop: jika sudah
+     * berada di urutan pertama/terakhir, nilainya null.
+     */
+    public function getSiblingSubRegionsProperty()
+    {
+        $siblings = Region::query()
+            ->where('category_region', $this->categoryRegion)
+            ->orderBy('id', 'asc')
+            ->get(['id', 'name_region']);
+
+        $currentIndex = $siblings->search(function ($region) {
+            return (string) $region->id === (string) $this->subRegionId || $region->name_region === $this->subRegion;
+        });
+
+        if ($currentIndex === false) {
+            return ['prev' => null, 'next' => null, 'index' => 0, 'total' => $siblings->count()];
+        }
+
+        return [
+            'prev' => $currentIndex > 0 ? $siblings[$currentIndex - 1]->name_region : null,
+            'next' => $currentIndex < $siblings->count() - 1 ? $siblings[$currentIndex + 1]->name_region : null,
+            'index' => $currentIndex + 1,
+            'total' => $siblings->count(),
+        ];
+    }
+
+    public function prevSubRegion()
+    {
+        $this->goToAdjacentSubRegion($this->siblingSubRegions['prev'] ?? null);
+    }
+
+    public function nextSubRegion()
+    {
+        $this->goToAdjacentSubRegion($this->siblingSubRegions['next'] ?? null);
+    }
+
+    public function goToAdjacentSubRegion($subRegion)
+    {
+        // Jangan pindah jika target kosong (berada di ujung kelompok / tanpa loop)
+        if (empty($subRegion)) {
+            return;
+        }
+
+        $guestUuid = session('guest_uuid');
+        if ($guestUuid) {
+            Guest_User::where('uuid', $guestUuid)->update([
+                'current_location' => $subRegion,
+                'last_seen_at' => now(),
+            ]);
+        }
+
+        event(new UserLocationUpdated());
+
+        return redirect()->route('user.scan-item', [
+            'categoryRegion' => $this->categoryRegion,
+            'subRegion' => $subRegion,
+        ]);
+    }
+
+    /**
+     * Ambil daftar item + SN untuk sub region ini (query segar setiap dipanggil).
+     */
+    public function getItemSerialsCollection()
     {
         $subRegionId = $this->getSubRegionId();
 
@@ -103,6 +171,120 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         }
 
         return $items;
+    }
+
+    public function getItemSerialsProperty()
+    {
+        return $this->getItemSerialsCollection();
+    }
+
+    /**
+     * Auto next item: setelah SN berhasil di-save, pindahkan seleksi ke item
+     * berikutnya yang belum punya SN (urutan daftar). Jika tidak ada di posisi
+     * setelahnya, pakai item pertama yang masih belum di-scan (mis. setelah
+     * melompat). Jika semua item sudah di-scan, seleksi tidak dipindahkan.
+     *
+     * Berhasil pindah seleksi → dispatch event 'focus-manual-sn' agar sisi
+     * client switch ke tab Ketik SN dan focus ke form input manual.
+     */
+    public function autoNextItem()
+    {
+        // Query segar (bukan computed property) agar SN hasil save langsung terbaca
+        $items = $this->getItemSerialsCollection();
+
+        $currentIndex = $items->search(fn ($item) => (string) $item->id === (string) $this->idSelectedItem);
+
+        $next = null;
+
+        if ($currentIndex !== false) {
+            $next = $items->slice($currentIndex + 1)->first(fn ($item) => empty($item->serial_number));
+        }
+
+        // Fallback: item pertama yang belum di-scan (bisa sebelum posisi saat ini)
+        $next = $next ?? $items->first(fn ($item) => empty($item->serial_number));
+
+        if (!$next) {
+            Flux::toast('Semua item pada daerah ini sudah di-scan.', null, 3000, 'success');
+
+            return;
+        }
+
+        $this->idSelectedItem = (string) $next->id;
+
+        $this->dispatch('focus-manual-sn');
+    }
+
+    /**
+     * Navigasi prev/next item dalam daftar (urutan item, tanpa loop).
+     * prev/next bernilai null saat berada di item pertama/terakhir.
+     * index/total = posisi item terpilih saat ini (1-based).
+     */
+    public function getItemNavProperty()
+    {
+        $items = $this->getItemSerialsCollection();
+
+        $currentIndex = $items->search(fn ($item) => (string) $item->id === (string) $this->idSelectedItem);
+
+        if ($currentIndex === false) {
+            return ['prev' => null, 'next' => null, 'index' => 0, 'total' => $items->count()];
+        }
+
+        return [
+            'prev' => $currentIndex > 0 ? $items[$currentIndex - 1]->id : null,
+            'next' => $currentIndex < $items->count() - 1 ? $items[$currentIndex + 1]->id : null,
+            'index' => $currentIndex + 1,
+            'total' => $items->count(),
+        ];
+    }
+
+    /**
+     * ID item tetangga (offset -1 = sebelumnya, +1 = sesudahnya) berdasarkan
+     * urutan daftar. Mengembalikan null di ujung (tanpa loop).
+     *
+     * Catatan: memakai query segar (bukan computed property) agar tidak
+     * menyimpan nilai lama di cache computed saat dipanggil dari action.
+     */
+    public function adjacentItemId(int $offset)
+    {
+        $items = $this->getItemSerialsCollection();
+
+        $currentIndex = $items->search(fn ($item) => (string) $item->id === (string) $this->idSelectedItem);
+
+        if ($currentIndex === false) {
+            return null;
+        }
+
+        $targetIndex = $currentIndex + $offset;
+
+        return $targetIndex >= 0 && $targetIndex < $items->count() ? $items[$targetIndex]->id : null;
+    }
+
+    public function prevItem()
+    {
+        $this->goToAdjacentItem($this->adjacentItemId(-1));
+    }
+
+    public function nextItem()
+    {
+        $this->goToAdjacentItem($this->adjacentItemId(1));
+    }
+
+    public function goToAdjacentItem($itemId)
+    {
+        // Jangan pindah jika target kosong (berada di item pertama/terakhir / tanpa loop)
+        if (empty($itemId)) {
+            return;
+        }
+
+        $this->idSelectedItem = (string) $itemId;
+
+        // Buang SN yang belum diproses agar tidak ikut tertempel ke item lain
+        $this->serial_number = '';
+
+        $this->dispatch('refreshTable');
+
+        // Kembali focus ke form input SN manual (juga memastikan tab Ketik SN aktif)
+        $this->dispatch('focus-manual-sn');
     }
 
     public function columnItemSelected($itemId)
@@ -226,6 +408,11 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         }
 
         $this->clear();
+
+        if ($save) {
+            // Auto pindah ke item berikutnya + switch/focus form input SN manual
+            $this->autoNextItem();
+        }
     }
 
     public function deleteMapping()
@@ -364,11 +551,57 @@ new #[Layout('layouts.app-mobile')] class extends Component {
         <span class="text-sm text-[#4338CB] font-semibold uppercase tracking-wide">{{ $subRegion }}</span>
     </div>
 
+    {{-- Navigasi Prev / Next Sub Region dalam satu kelompok (tanpa loop) --}}
+    @php
+        $siblings = $this->siblingSubRegions;
+    @endphp
+    <div class="flex items-center gap-2">
+        @if (!empty($siblings['prev']))
+            <button type="button" wire:click="prevSubRegion" wire:loading.attr="disabled"
+                title="Sub region sebelumnya: {{ $siblings['prev'] }}"
+                class="flex min-w-0 flex-1 items-center gap-1.5 rounded-lg border border-[#cbd5e1] bg-white px-3 py-2.5 text-xs font-semibold text-[#0f172a] transition hover:border-[#94a3b8] hover:bg-[#f8fafc] sm:text-sm">
+                <flux:icon.chevron-left class="h-4 w-4 shrink-0 text-[#64748b]" />
+                <span class="truncate">{{ $siblings['prev'] }}</span>
+            </button>
+        @else
+            <button type="button" disabled title="Sudah di sub region pertama dalam kelompok ini"
+                class="flex min-w-0 flex-1 cursor-not-allowed items-center gap-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2.5 text-xs font-semibold text-[#94a3b8] sm:text-sm">
+                <flux:icon.chevron-left class="h-4 w-4 shrink-0" />
+                <span class="truncate">Pertama</span>
+            </button>
+        @endif
+
+        <span class="shrink-0 font-jetbrains text-xs font-bold text-[#64748b]">
+            {{ $siblings['index'] }}/{{ $siblings['total'] }}
+        </span>
+
+        @if (!empty($siblings['next']))
+            <button type="button" wire:click="nextSubRegion" wire:loading.attr="disabled"
+                title="Sub region berikutnya: {{ $siblings['next'] }}"
+                class="flex min-w-0 flex-1 items-center justify-end gap-1.5 rounded-lg border border-[#cbd5e1] bg-white px-3 py-2.5 text-xs font-semibold text-[#0f172a] transition hover:border-[#94a3b8] hover:bg-[#f8fafc] sm:text-sm">
+                <span class="truncate">{{ $siblings['next'] }}</span>
+                <flux:icon.chevron-right class="h-4 w-4 shrink-0 text-[#64748b]" />
+            </button>
+        @else
+            <button type="button" disabled title="Sudah di sub region terakhir dalam kelompok ini"
+                class="flex min-w-0 flex-1 cursor-not-allowed items-center justify-end gap-1.5 rounded-lg border border-[#e2e8f0] bg-[#f8fafc] px-3 py-2.5 text-xs font-semibold text-[#94a3b8] sm:text-sm">
+                <span class="truncate">Terakhir</span>
+                <flux:icon.chevron-right class="h-4 w-4 shrink-0" />
+            </button>
+        @endif
+    </div>
+
     <div x-data="{
         barcodeScannerSection: true,
         ocrScannerSection: false,
         typeSerialNumberSection: false
-    }">
+    }" @focus-manual-sn.window="
+        barcodeScannerSection = false;
+        ocrScannerSection = false;
+        typeSerialNumberSection = true;
+        $dispatch('tab-changed', 'type');
+        $nextTick(() => $refs.typedInput && $refs.typedInput.focus());
+    ">
 
         <div class="mb-4 flex w-full items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-slate-800">
             <button
@@ -441,18 +674,55 @@ new #[Layout('layouts.app-mobile')] class extends Component {
                     </h3>
                 </div>
 
-                {{-- Selected item info --}}
-                <div
-                    class="flex items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-600 dark:bg-slate-700/50">
-                    <flux:icon.cube class="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-400" />
-                    <div class="min-w-0 flex-1">
-                        <p class="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-                            Item Dipilih
-                        </p>
-                        <p class="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-                            {{ $this->selectedItemName ?? 'Belum ada item dipilih' }}
-                        </p>
+                {{-- Selected item info + navigasi prev/next item --}}
+                @php
+                    $itemNav = $this->itemNav;
+                @endphp
+                <div class="flex items-stretch gap-2">
+                    @if (!empty($itemNav['prev']))
+                        <button type="button" wire:click="prevItem" wire:loading.attr="disabled"
+                            aria-label="Item sebelumnya" title="Item sebelumnya"
+                            class="flex w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-[#4338ca] transition hover:bg-indigo-50 dark:border-zinc-600 dark:bg-slate-700 dark:text-indigo-300 dark:hover:bg-slate-600">
+                            <flux:icon.chevron-left class="h-5 w-5" />
+                        </button>
+                    @else
+                        <button type="button" disabled aria-label="Item pertama" title="Sudah di item pertama"
+                            class="flex w-10 shrink-0 cursor-not-allowed items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-slate-800">
+                            <flux:icon.chevron-left class="h-5 w-5" />
+                        </button>
+                    @endif
+
+                    <div
+                        class="flex min-w-0 flex-1 items-center gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-600 dark:bg-slate-700/50">
+                        <flux:icon.cube class="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-400" />
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center justify-between gap-2">
+                                <p
+                                    class="text-[11px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
+                                    Item Dipilih
+                                </p>
+                                <span class="shrink-0 font-jetbrains text-[11px] font-bold text-zinc-500 dark:text-zinc-400">
+                                    {{ $itemNav['index'] }}/{{ $itemNav['total'] }}
+                                </span>
+                            </div>
+                            <p class="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+                                {{ $this->selectedItemName ?? 'Belum ada item dipilih' }}
+                            </p>
+                        </div>
                     </div>
+
+                    @if (!empty($itemNav['next']))
+                        <button type="button" wire:click="nextItem" wire:loading.attr="disabled"
+                            aria-label="Item berikutnya" title="Item berikutnya"
+                            class="flex w-10 shrink-0 items-center justify-center rounded-lg border border-zinc-300 bg-white text-[#4338ca] transition hover:bg-indigo-50 dark:border-zinc-600 dark:bg-slate-700 dark:text-indigo-300 dark:hover:bg-slate-600">
+                            <flux:icon.chevron-right class="h-5 w-5" />
+                        </button>
+                    @else
+                        <button type="button" disabled aria-label="Item terakhir" title="Sudah di item terakhir"
+                            class="flex w-10 shrink-0 cursor-not-allowed items-center justify-center rounded-lg border border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-slate-800">
+                            <flux:icon.chevron-right class="h-5 w-5" />
+                        </button>
+                    @endif
                 </div>
 
                 {{-- Input --}}

@@ -57,9 +57,28 @@ new #[Layout('layouts.app-mobile')] class extends Component {
 
     public function getRegionsProperty()
     {
+        // Subquery per satker (region): menghitung total item pada project satker tersebut
+        // dan jumlah item yang sudah di-scan (ada di mapping_lists) di satker itu
+        $regionProgress = DB::table('regions as progress_regions')
+            ->select('progress_regions.id')
+            ->selectRaw(
+                '(SELECT COUNT(*) FROM items WHERE CAST(items.project_id AS CHAR) = CAST(progress_regions.project_id AS CHAR)) as total_items'
+            )
+            ->selectRaw('COUNT(DISTINCT mapping_lists.item_id) as items_scanned')
+            ->leftJoin('mapping_lists', 'mapping_lists.region_id', '=', 'progress_regions.id')
+            ->groupBy('progress_regions.id', 'progress_regions.project_id');
+
         return Region::query()
-            ->select(['regions.category_region', DB::raw('COUNT(DISTINCT regions.id) as count_total_region'), DB::raw('COUNT(mapping_lists.id) as total_region_done_mapping')])
-            ->leftJoin('mapping_lists', 'regions.id', '=', 'mapping_lists.region_id')
+            ->select([
+                'regions.category_region',
+                DB::raw('COUNT(DISTINCT regions.id) as count_total_region'),
+                // Jumlah satker pada kategori ini yang sudah done scan SELURUH item
+                // (minimal 1 item project dan tidak ada item yang tersisa belum di-scan)
+                DB::raw('COALESCE(SUM(CASE WHEN region_progress.total_items > 0 AND region_progress.items_scanned >= region_progress.total_items THEN 1 ELSE 0 END), 0) as total_region_done_mapping'),
+            ])
+            ->joinSub($regionProgress, 'region_progress', function ($join) {
+                $join->on('region_progress.id', '=', 'regions.id');
+            })
             ->when($this->search, function ($query, $search) {
                 $query->where(function ($q) use ($search) {
                     $q->where('regions.category_region', 'like', "%{$search}%")->orWhereIn('regions.category_region', function ($subQuery) use ($search) {
@@ -232,7 +251,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">
         @forelse ($this->regions as $region)
             <div wire:key="region-{{ $region->category_region }}"
-                wire:click="selectCard('{{ $region->category_region }}')" @class([
+                wire:click="selectCard(@js($region->category_region))" @class([
                     'flex flex-col w-full border bg-[#ffffff] rounded-lg overflow-hidden transition-all cursor-pointer',
                     'border-[#4338ca] ring-1 ring-[#4338ca] shadow-[0_1px_2px_rgba(15,23,42,0.12)]' =>
                         $selectedCard === $region->category_region,
@@ -242,7 +261,8 @@ new #[Layout('layouts.app-mobile')] class extends Component {
                 @php
                     $workers = $this->activeUsers[$region->category_region] ?? [];
 
-                    $mod_region = $region->count_total_region - $region->total_region_done_mapping;
+                    // $mod_region = $region->count_total_region - $region->total_region_done_mapping;
+                    $mod_region = $region->count_total_region;
                     $worker_count = count($workers);
 
                     $status = '';
@@ -381,7 +401,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
                         $isLocked = $worker_count >= $mod_region;
                     @endphp
                     <button
-                        @if (!$isLocked) wire:click.stop="chooseRegion('{{ $region->category_region }}')"
+                        @if (!$isLocked) wire:click.stop="chooseRegion(@js($region->category_region))"
                         @else
                             disabled @endif
                         @class([

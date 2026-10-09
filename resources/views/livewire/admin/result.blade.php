@@ -205,6 +205,7 @@ new class extends Component
         // 2. Ambil regions beserta data mapping_lists terkait pada project_id tersebut.
         //    Diurutkan per kategori agar baris berkategori sama berdekatan (untuk di-merge).
         $regions = Region::where('project_id', $projectId)
+            ->orderBy('id')
             ->orderBy('category_region')
             ->orderBy('name_region')
             ->with([

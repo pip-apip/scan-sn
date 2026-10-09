@@ -235,7 +235,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
 
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">
         @forelse ($this->regions as $region)
-            <div wire:key="region-{{ $region->name_region }}" wire:click="selectCard('{{ $region->name_region }}')"
+            <div wire:key="region-{{ $region->name_region }}" wire:click="selectCard(@js($region->name_region))"
                 @class([
                     'flex flex-col w-full border bg-[#ffffff] rounded-lg overflow-hidden transition-all cursor-pointer',
                     'border-[#4338ca] ring-1 ring-[#4338ca] shadow-[0_1px_2px_rgba(15,23,42,0.12)]' =>
@@ -386,7 +386,7 @@ new #[Layout('layouts.app-mobile')] class extends Component {
                         $isLocked = $worker_count !== 0;
                     @endphp
                     <button
-                        @if (!$isLocked) wire:click.stop="chooseSubRegion('{{ $region->name_region }}')"
+                        @if (!$isLocked) wire:click.stop="chooseSubRegion(@js($region->name_region))"
                         @else
                             disabled @endif
                         @class([
